@@ -71,4 +71,4 @@ def train(root='data_npz', epochs=25):
         torch.save(net.state_dict(), f'unet_ep{ep+1:02d}.pth')
 
 if __name__ == '__main__':
-    train('waypoint_npz')
+    train('npz_pairs')

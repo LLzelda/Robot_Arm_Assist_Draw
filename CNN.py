@@ -54,14 +54,20 @@ class UNet(nn.Module):
 def train(root='data_npz', epochs=25):
     ds   = WaypointSet(root)
     dl   = DataLoader(ds, batch_size=16, shuffle=True, num_workers=4)
-    net  = UNet().cuda()
+    # net  = UNet().cuda()
+    # opt  = torch.optim.Adam(net.parameters(), 3e-4)
+    # crit = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([5.]).cuda())
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    net  = UNet().to(device)
     opt  = torch.optim.Adam(net.parameters(), 3e-4)
-    crit = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([5.]).cuda())
+    crit = nn.BCEWithLogitsLoss(
+    pos_weight=torch.tensor([5.], device=device))
 
     for ep in range(epochs):
         net.train(); running=0
         for img,hm in dl:
-            img,hm = img.cuda().float(), hm.cuda()
+            #img,hm = img.cuda().float(), hm.cuda()
+            img, hm = img.to(device), hm.to(device)
             opt.zero_grad()
             out = net(img)
             loss= crit(out, hm)

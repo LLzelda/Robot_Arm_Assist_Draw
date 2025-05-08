@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Train a tiny U‑Net to predict the pen‑tip’s next‑waypoint heat‑map.
+Train a tiny U-Net to predict the pen-tips nex-waypoint heat-ap.
 Assumes your training pairs are stored as *.npz files with keys:
-    img :  H×W×3  uint8   (BGR or RGB is fine)
-    hm  :  H×W     float32 (0‑1 heat‑map)
+    img :  HxWx3uint8   (BGR or RGB is fine)
+    hm  :  HxW   float32 (0-1map)
 """
 
 import cv2, glob, os, argparse, numpy as np, torch
@@ -11,13 +11,6 @@ from torch import nn
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from tqdm import tqdm
-
-# ---------- command‑line ----------
-ap = argparse.ArgumentParser()
-ap.add_argument('--root',   required=True, help='folder with *.npz pairs')
-ap.add_argument('--epochs', type=int, default=25)
-ap.add_argument('--batch',  type=int, default=16)
-args = ap.parse_args()
 
 # ---------- dataset ----------
 class WaypointSet(Dataset):
@@ -66,25 +59,49 @@ class UNet(nn.Module):
         return self.o(d1)        # logits
 
 # ---------- train ----------
-ds  = WaypointSet(args.root)
-dl  = DataLoader(ds, batch_size=args.batch, shuffle=True, num_workers=0)
-# net = UNet().cuda()
-# opt = torch.optim.Adam(net.parameters(), 3e-4)
-# crit= nn.BCEWithLogitsLoss(pos_weight=torch.tensor([5.]).cuda())
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-net  = UNet().to(device)
-opt  = torch.optim.Adam(net.parameters(), 3e-4)
-crit = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([5.], device=device))
+def main():
+    ds  = WaypointSet(args.root)
+    dl  = DataLoader(ds, batch_size=args.batch, shuffle=True, 
+                    num_workers=4,multiprocessing_context='spawn')
+    # net = UNet().cuda()
+    # opt = torch.optim.Adam(net.parameters(), 3e-4)
+    # crit= nn.BCEWithLogitsLoss(pos_weight=torch.tensor([5.]).cuda())
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    net  = UNet().to(device)
+    opt  = torch.optim.Adam(net.parameters(), 3e-4)
+    crit = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([5.], device=device))
+    
+    # for ep in range(args.epochs):
+    #     net.train()
+    #     epoch_loss = 0
+    #     for img, hm in tqdm(dl, desc=f'Epoch {ep+1}/{args.epochs}'):   # <‑‑ wrap here
+    #         img, hm = img.to(device), hm.to(device)
+    #         opt.zero_grad()
+    #         loss = crit(net(img), hm)
+    #         loss.backward(); opt.step()
+    #         epoch_loss += loss.item() * img.size(0)
+    from torch.cuda.amp import GradScaler, autocast 
+    scaler = GradScaler()
 
-for ep in range(args.epochs):
-    net.train()
-    epoch_loss = 0
-    for img, hm in tqdm(dl, desc=f'Epoch {ep+1}/{args.epochs}'):   # <‑‑ wrap here
-        img, hm = img.to(device), hm.to(device)
-        opt.zero_grad()
-        loss = crit(net(img), hm)
-        loss.backward(); opt.step()
-        epoch_loss += loss.item() * img.size(0)
-    print(f'\nEpoch {ep+1}/{args.epochs}  loss {epoch_loss/len(ds):.4f}')
-    torch.save(net.state_dict(), f'unet_ep{ep+1:02d}.pth')
+    for ep in range(args.epochs):
+        net.train(); epoch_loss = 0
+        for img, hm in tqdm(dl, desc=f'Epoch {ep+1}/{args.epochs}'):
+            img, hm = img.to(device), hm.to(device)
+            opt.zero_grad()
+            with autocast():
+                loss = crit(net(img), hm)
+            scaler.scale(loss).backward()
+            scaler.step(opt); scaler.update()
+            epoch_loss += loss.item() * img.size(0)
+        print(f'\nEpoch {ep+1}/{args.epochs}  loss {epoch_loss/len(ds):.4f}')
+        torch.save(net.state_dict(),
+                    os.path.join(args.root, f'unet_ep{ep+1:02d}.pth'))
 
+# ---------- command‑line ----------
+if __name__ == '__main__': 
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--root',   required=True, help='folder with *.npz pairs')
+    ap.add_argument('--epochs', type=int, default=25)
+    ap.add_argument('--batch',  type=int, default=16)
+    args = ap.parse_args()
+    main()
